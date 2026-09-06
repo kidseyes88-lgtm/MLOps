@@ -1,56 +1,77 @@
-
-name: MLOps pipeline
+name: Bank Customer Churn MLOps Pipeline
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:      # lets you click "Run workflow" in the Actions tab
+
+permissions:
+  contents: write
 
 jobs:
-
+  # ---------- JOB 1: Register Dataset ----------
   register-dataset:
+    name: Register Dataset
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r mlops/requirements.txt
-      - name: Upload Dataset to Hugging Face Hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python mlops/model_building/data_register.py
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Register dataset
+        run: python model_building/data_register.py
+      - name: Upload registered dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: registered-data
+          path: data/bank_customer_churn.csv
 
-  data-prep:
-    needs: register-dataset
+  # ---------- JOB 2: Data Preparation ----------
+  data-preparation:
+    name: Data Preparation
+    needs: register-dataset          # waits for Job 1 to finish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r mlops/requirements.txt
-      - name: Run Data Preparation
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python mlops/model_building/prep.py
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Prepare data
+        run: python model_building/prep.py
+      - name: Upload train/test splits
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-splits
+          path: |
+            Xtrain.csv
+            Xtest.csv
+            ytrain.csv
+            ytest.csv
 
-
-  model-traning:
-    needs: data-prep
+  # ---------- JOB 3: Model Training ----------
+  model-training:
+    name: Model Training
+    needs: data-preparation          # waits for Job 2 to finish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r mlops/requirements.txt
-      - name: Model Building
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python mlops/model_building/train.py
-
-
-  deploy-hosting:
-    runs-on: ubuntu-latest
-    needs: [model-traning,data-prep,register-dataset]
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        run: pip install -r mlops/requirements.txt
-      - name: Push files to Frontend Hugging Face Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python mlops/hosting/hosting.py
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download train/test splits
+        uses: actions/download-artifact@v4
+        with:
+          name: data-splits          # brings Xtrain/Xtest/ytrain/ytest from Job 2
+      - name: Train model
+        run: python model_building/train.py
+      - name: Commit trained model
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployment/best_churn_model_v1.joblib
+          git commit -m "Add trained model [skip ci]" || echo "No changes to commit"
+          git push
